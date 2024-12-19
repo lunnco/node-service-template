@@ -3,6 +3,7 @@ import fastify, { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import { registerRoutes } from '../../interfaces/http/routes';
+import { ShutdownManager } from './shutdown';
 
 async function buildFramework(): Promise<FastifyInstance> {
     const server = fastify({
@@ -18,6 +19,15 @@ async function buildFramework(): Promise<FastifyInstance> {
             }
           : true  // Use standard pino in production
       });
+  const shutdownManager = new ShutdownManager();
+
+  // Handle process signals
+  ['SIGTERM', 'SIGINT'].forEach((signal) => {
+    process.on(signal, async () => {
+      server.log.info(`${signal} received`);
+      await shutdownManager.gracefulShutdown(server);
+    });
+  });
 
   // Register core plugins
   await server.register(cors);
