@@ -9,7 +9,8 @@ import { createOpServer } from './infrastructure/framework/createOpServer';
  * @see {@link https://www.youtube.com/watch?v=HMM7GJC5E2o}
  */
 function getLoggerOptions() {
-  if (process.stdout.isTTY) {
+  const isDevelopment = process.env.NODE_ENV === 'development';
+  if (isDevelopment && process.stdout.isTTY) {
     return {
       level: 'info',
       transport: {
