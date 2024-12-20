@@ -3,17 +3,19 @@ import { buildFramework } from './infrastructure/framework';
 
 async function bootstrap() {
   try {
-    const app = await buildFramework();
+    const { appServer } = await buildFramework();
 
-    await app.listen({ port: 3000, host: '0.0.0.0' });
-    
-    app.log.info('Server is running on port 3000');
+    await appServer.listen({ 
+      port: Number(process.env.APP_PORT) || 3000, 
+      host: '0.0.0.0' 
+    });
+
+    appServer.log.info(`App server listening on port ${process.env.APP_PORT || 3000}`);
+    appServer.log.info(`Metrics available on port ${process.env.OPS_PORT || 9464}/metrics`);
   } catch (err) {
-    console.error('Error starting server:', err);
+    console.error('Error starting servers:', err);
     process.exit(1);
   }
-}
-
-if (require.main === module) {
-  bootstrap();
-}
+ }
+ 
+ bootstrap();
