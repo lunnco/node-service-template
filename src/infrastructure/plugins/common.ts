@@ -1,10 +1,6 @@
 import fastifyPlugin from 'fastify-plugin';
 import { strict as assert } from 'node:assert';
 import handleLoad from '@fastify/under-pressure';
-// import handleAccessLogging from '@zenbusiness/fastify-access-logging-plugin';
-// import handleUnavailable from '@zenbusiness/fastify-unavailable-plugin';
-
-//import metricsInstrumentation from '../framework/metrics/instrumentation';
 import { FastifyInstance, FastifyRequest } from 'fastify';
 import { CommonPluginOptions, ReleaseInfo } from '../server/interfaces';
 import fastifyRateLimit from '@fastify/rate-limit';
@@ -21,9 +17,6 @@ async function registerCommonPlugins(
   assert(options, '\'options\' is required');
 
   const {
-    accessLogging,
-    metrics,
-    unavailable,
     underPressure = {
       message: 'Unavailable due to load',
       retryAfter: 10,
@@ -37,16 +30,7 @@ async function registerCommonPlugins(
     tag: process.env.RELEASE_TAG ?? 'unset'
   };
 
-  // Expose service name for dependencies/plugins
 
-
-  // Handle unavailable response for maintenance downtime
-  //await server.register(handleUnavailable, unavailable);
-
-  // Handle access logging
-  //await server.register(handleAccessLogging, accessLogging);
-
-  // Register health monitoring with status report route
   await server.register(handleLoad, underPressure);
   await server.register(fastifyRateLimit, {
       max: 100,
@@ -101,12 +85,6 @@ async function registerCommonPlugins(
 
       return { message: 'Not Found' }
     })
-
-  // Register handler to expose openTelemetry metrics for monitoring
-  // await server.register(metricsInstrumentation, {
-  //   name,
-  //   ...metrics
-  // });
 
   // Register version monitoring report route
   server.route({
