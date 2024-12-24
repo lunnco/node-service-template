@@ -3,57 +3,24 @@ import { strict as assert } from 'node:assert';
 import handleLoad from '@fastify/under-pressure';
 // import handleAccessLogging from '@zenbusiness/fastify-access-logging-plugin';
 // import handleUnavailable from '@zenbusiness/fastify-unavailable-plugin';
-import metricsInstrumentation from '../framework/metrics/instrumentation';
+
+//import metricsInstrumentation from '../framework/metrics/instrumentation';
 import { FastifyInstance, FastifyRequest } from 'fastify';
+import { CommonPluginOptions, ReleaseInfo } from '../server/interfaces';
+import fastifyRateLimit from '@fastify/rate-limit';
 
-interface ReleaseInfo {
-  sha: string;
-  branch: string;
-  tag: string;
-}
 
-interface UnderPressureOptions {
-  message?: string;
-  retryAfter?: number;
-  exposeStatusRoute?: string;
-  [key: string]: unknown;
-}
-
-interface UnavailableOptions {
-  ignores?: {
-    [key: string]: unknown;
-  };
-  [key: string]: unknown;
-}
-
-interface AccessLoggingOptions {
-  ignoreLoggingUrl?: (url: string) => boolean;
-  [key: string]: unknown;
-}
-
-interface MetricsOptions {
-  [key: string]: unknown;
-}
-
-interface CommonPluginOptions {
-  name: string;
-  accessLogging?: AccessLoggingOptions;
-  metrics?: MetricsOptions;
-  unavailable?: UnavailableOptions;
-  underPressure?: UnderPressureOptions;
-}
 
 /**
  * Set of plugins common to all Node.js Fastify applications
  */
-async function commonPlugins(
+async function registerCommonPlugins(
   server: FastifyInstance,
   options: CommonPluginOptions
 ): Promise<void> {
   assert(options, '\'options\' is required');
 
   const {
-    name,
     accessLogging,
     metrics,
     unavailable,
@@ -64,8 +31,6 @@ async function commonPlugins(
     }
   } = options;
 
-  assert(name, '\'name\' is required');
-
   const RELEASE_INFO: ReleaseInfo = {
     sha: process.env.RELEASE_VERSION ?? 'unset',
     branch: process.env.RELEASE_BRANCH ?? 'unset',
@@ -73,7 +38,7 @@ async function commonPlugins(
   };
 
   // Expose service name for dependencies/plugins
-  server.decorate('name', name);
+
 
   // Handle unavailable response for maintenance downtime
   //await server.register(handleUnavailable, unavailable);
@@ -83,12 +48,65 @@ async function commonPlugins(
 
   // Register health monitoring with status report route
   await server.register(handleLoad, underPressure);
+  await server.register(fastifyRateLimit, {
+      max: 100,
+      timeWindow: '1 minute'
+    })
+
+  server.setErrorHandler((err, request, reply) => {
+    server.log.error(
+      {
+        err,
+        request: {
+          method: request.method,
+          url: request.url,
+          query: request.query,
+          params: request.params
+        }
+      },
+      'Unhandled error occurred'
+    )
+
+    reply.code(err.statusCode ?? 500)
+
+    let message = 'Internal Server Error'
+    if (err.statusCode && err.statusCode < 500) {
+      message = err.message
+    }
+
+    return { message }
+  })
+  // An attacker could search for valid URLs if your 404 error handling is not rate limited.
+  server.setNotFoundHandler(
+    {
+      preHandler: server.rateLimit({
+        max: 3,
+        timeWindow: 500
+      })
+    },
+    (request, reply) => {
+      request.log.warn(
+        {
+          request: {
+            method: request.method,
+            url: request.url,
+            query: request.query,
+            params: request.params
+          }
+        },
+        'Resource not found'
+      )
+
+      reply.code(404)
+
+      return { message: 'Not Found' }
+    })
 
   // Register handler to expose openTelemetry metrics for monitoring
-  await server.register(metricsInstrumentation, {
-    name,
-    ...metrics
-  });
+  // await server.register(metricsInstrumentation, {
+  //   name,
+  //   ...metrics
+  // });
 
   // Register version monitoring report route
   server.route({
@@ -118,7 +136,7 @@ async function commonPlugins(
   });
 }
 
-export default fastifyPlugin(commonPlugins, {
+export default fastifyPlugin(registerCommonPlugins, {
   fastify: '5', // Removed v3 support to focus on latest version
   name: 'common'
 });

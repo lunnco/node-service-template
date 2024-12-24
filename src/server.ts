@@ -1,76 +1,56 @@
-import Fastify from 'fastify';
-import closeWithGrace from 'close-with-grace';
-import './infrastructure/framework/env';
-import serviceApp from './app';
-import { createOpServer } from './infrastructure/framework/createOpServer';
+import closeWithGrace from "close-with-grace";
+import { Server } from "./infrastructure/server";
 
-/**
- * Do not use NODE_ENV to determine what logger (or any env related feature) to use
- * @see {@link https://www.youtube.com/watch?v=HMM7GJC5E2o}
- */
 function getLoggerOptions() {
-  const isDevelopment = process.env.NODE_ENV === 'development';
-  if (isDevelopment && process.stdout.isTTY) {
-    return {
-      level: 'info',
-      transport: {
-        target: 'pino-pretty',
-        options: {
-          translateTime: 'HH:MM:ss Z',
-          ignore: 'pid,hostname',
-        },
-      },
-    };
-  }
-
-  return { level: process.env.LOG_LEVEL ?? 'silent' };
-}
-
-async function init() {
-  const app = Fastify({
-    logger: getLoggerOptions(),
-    ajv: {
-      customOptions: {
-        coerceTypes: 'array',
-        removeAdditional: 'all',
-      },
-    },
-  });
-
-  const opsServer = await createOpServer({ name: process.env.SERVICE_NAME || 'app' });
-
-  // Register your application as a normal plugin.
-  app.register(serviceApp, { 
-    name: process.env.SERVICE_NAME || 'app',
-    metrics: {}
-   });
-
-  // Graceful shutdown using closeWithGrace
-  closeWithGrace(
-    { delay: process.env.FASTIFY_CLOSE_GRACE_DELAY ? parseInt(process.env.FASTIFY_CLOSE_GRACE_DELAY, 10) : 500 },
-    async ({ err }) => {
-      if (err != null) {
-        app.log.error(err);
-      }
-      await Promise.all([app.close(), opsServer.close()]);
+    const isDevelopment = process.env.NODE_ENV === 'development';
+    if (isDevelopment && process.stdout.isTTY) {
+        return {
+            level: process.env.LOG_LEVEL ?? 'info',
+            transport: {
+                target: 'pino-pretty',
+                options: {
+                    translateTime: 'HH:MM:ss Z',
+                    ignore: 'pid,hostname',
+                },
+            },
+        };
     }
-  );
 
-  try {
-    const appHost = process.env.NODE_HOST;
-    const appPort = process.env.NODE_PORT ? parseInt(process.env.NODE_PORT, 10) : 3000;
-    const opsHost = process.env.OPS_HOST || appHost;
-    const opsPort = process.env.OPS_PORT ? parseInt(process.env.OPS_PORT, 10) : 3001;
-
-    await app.listen({ host: appHost, port: appPort });
-    app.log.info(`Application server listening on ${appHost}:${appPort}`);
-
-    await opsServer.listen({ host: opsHost, port: opsPort });
-    opsServer.log.info(`Operations server listening on ${opsHost}:${opsPort}`);
-  } catch (err) {
-    app.log.error(err);
-    process.exit(1);
-  }
+    return { level: process.env.LOG_LEVEL ?? 'silent' };
 }
 
-init();
+async function bootstrap() {
+    const server = new Server({
+        port: parseInt(process.env.PORT || '3000'),
+        host: process.env.HOST || '0.0.0.0',
+        opsPort: parseInt(process.env.OPS_PORT || '9090'),
+        logger: getLoggerOptions(),
+        name: process.env.SERVICE_NAME || 'app'
+    }, {
+        underPressure: {
+            message: 'Service is under pressure',
+            retryAfter: 50,
+            exposeStatusRoute: '/status'
+        },
+        metrics: {}, // Add any metrics configuration if needed
+    });
+
+    await server.initialize();
+    await server.start();
+
+    // Graceful shutdown handling
+    closeWithGrace(
+        { delay: process.env.FASTIFY_CLOSE_GRACE_DELAY ? parseInt(process.env.FASTIFY_CLOSE_GRACE_DELAY, 10) : 500 },
+        async ({ err }: any) => {
+            if (err != null) {
+                server.app.log.error(err);
+            }
+            await Promise.all([server.app.close(), server.ops.close()]);
+        }
+    );
+}
+
+bootstrap().catch((err) => {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+});
